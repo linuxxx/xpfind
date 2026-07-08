@@ -2,6 +2,8 @@
 /build/
 /.gradle/
 /*.jar
+# 预构建产物，随仓库分发（便于直接取用）
+!/xpfind.jar
 
 
 # IDE
