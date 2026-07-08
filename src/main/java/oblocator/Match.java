@@ -11,7 +11,7 @@ import oblocator.api.Rule;
  * 匹配器。两级：
  *   dexPass    — dex 字节码层，便宜条件初筛（不加载类）。
  *   reflectPass — 反射层，对候选类做最终匹配，NORMAL 走弱匹配。
- * 匹配语义见方案 §4.3 / §6.2。
+ * 匹配语义：FAST 类型全名相等；NORMAL 走 isAssignableFrom 弱匹配。
  */
 public final class Match {
 

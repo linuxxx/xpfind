@@ -1,6 +1,6 @@
 package oblocator;
 
-/** 轻量日志。默认关闭（见 §33 log=false）；error 级始终输出。 */
+/** 轻量日志。默认关闭；error 级始终输出。 */
 public final class Log {
 
     public static final String TAG = "OL";

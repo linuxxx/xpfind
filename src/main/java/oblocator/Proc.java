@@ -4,7 +4,7 @@ import java.io.BufferedReader;
 import java.io.FileReader;
 import java.lang.reflect.Method;
 
-/** 进程工具。用于 §28 多进程门控：默认只在主进程执行。 */
+/** 进程工具。用于多进程门控：默认只在主进程执行。 */
 public final class Proc {
 
     private Proc() {}

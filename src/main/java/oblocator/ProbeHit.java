@@ -4,7 +4,7 @@ import java.util.Arrays;
 
 /**
  * dex 初筛层的命中（{@link OL#probe}）。只来自 dex 字节解析，不加载类、不含反射 Method。
- * 用于本地/离线快速验证规则是否合理（见方案 §14 probe）。
+ * 用于本地/离线快速验证规则是否合理。
  */
 public final class ProbeHit {
 

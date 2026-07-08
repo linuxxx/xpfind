@@ -2,7 +2,7 @@ package oblocator;
 
 import java.util.List;
 
-/** 扫描结果 + 元数据（§14.3 可观测性）。 */
+/** 扫描结果 + 元数据（可观测性）。 */
 public final class ScanResult {
 
     public final List<Hit> hits;

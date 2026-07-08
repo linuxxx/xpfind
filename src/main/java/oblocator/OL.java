@@ -8,7 +8,7 @@ import java.util.List;
 import oblocator.api.Rule;
 
 /**
- * 主入口（§13.1）。链式构建 + 终止执行。
+ * 主入口。链式构建 + 终止执行。
  *
  * <pre>
  * List&lt;Hit&gt; hits = OL.with(ctx, cl).pkg("com.target.app").fast()
@@ -69,13 +69,13 @@ public final class OL {
     /** 类数预算；<=0 表示不限。 */
     public OL maxClasses(int n) { this.maxClasses = n; return this; }
 
-    /** 允许无 pkg 全量扫描（危险，默认禁止，见 §27）。 */
+    /** 允许无 pkg 全量扫描（危险，默认禁止）。 */
     public OL allowAll() { this.allowAll = true; return this; }
 
     public OL proc(String proc) { this.proc = proc; return this; }
     public OL anyProc() { this.anyProc = true; return this; }
 
-    /** 动态 dex（§29，第一版不实现，仅占位）。 */
+    /** 动态 dex（第一版不实现，仅占位）。 */
     public OL dyn() { this.dyn = true; return this; }
 
     /**
@@ -145,7 +145,7 @@ public final class OL {
         return Scan.probe(this, rule);
     }
 
-    /** 后台扫描，完成回调（§14.1）。回调在工作线程执行。 */
+    /** 后台扫描，完成回调。回调在工作线程执行。 */
     public void async(final OnScan cb) {
         Thread t = new Thread(new Runnable() {
             @Override

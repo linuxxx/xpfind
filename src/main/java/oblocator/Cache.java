@@ -15,11 +15,11 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * 三层缓存（§8）：
+ * 三层缓存：
  *   L1 内存：进程内 ruleHits / classList。
  *   L2/L3 文件：App 版本级 meta + 每规则命中集，JSON 落地。
  * 只缓存完整命中集；预算被截断的扫描不写缓存（Scan 侧判断）。
- * 命中缓存读出后必须经 resolve() 用反射校验签名，再交给调用方（§24）。
+ * 命中缓存读出后必须经 resolve() 用反射校验签名，再交给调用方。
  */
 public final class Cache {
 
@@ -64,7 +64,7 @@ public final class Cache {
         try {
             List<Hit> hits = readHits(f);
             if (hits == null) return null;
-            if (!resolveAll(hits)) return null; // §24 校验失败 → 视为未命中
+            if (!resolveAll(hits)) return null; // 校验失败 → 视为未命中
             MEM.put(memKey(pkg, mode, ruleHash), copy(hits));
             return hits;
         } catch (Throwable t) {
@@ -153,7 +153,7 @@ public final class Cache {
         o.put("verCode", verCode);
         o.put("apkPath", apkPath == null ? "" : apkPath);
         o.put("apkLastModified", apkLastMod);
-        o.put("apkLen", apkLen);   // apkLastModified 在重装/OTA 后可能保留，故用长度兜底（CRC 见 §8.2，v1 从简）
+        o.put("apkLen", apkLen);   // apkLastModified 在重装/OTA 后可能保留，故用长度兜底（v1 从简）
         return o;
     }
 
@@ -210,7 +210,7 @@ public final class Cache {
         }
     }
 
-    // ---- Method 重绑定 + 校验（§24 / §26）----
+    // ---- Method 重绑定 + 校验 ----
 
     private boolean resolveAll(List<Hit> hits) {
         for (Hit h : hits) {
@@ -245,7 +245,7 @@ public final class Cache {
         return false;
     }
 
-    // ---- 文件 IO（原子写：tmp + rename，多进程安全，§8.2）----
+    // ---- 文件 IO（原子写：tmp + rename，多进程安全）----
 
     private static void writeText(File f, String text) {
         File tmp = new File(f.getParentFile(), f.getName() + ".tmp." + android.os.Process.myPid());

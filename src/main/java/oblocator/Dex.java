@@ -16,7 +16,7 @@ import java.util.zip.ZipFile;
 import java.util.zip.ZipInputStream;
 
 /**
- * 纯 Java 最小 dex 解析器（§10.0）。
+ * 纯 Java 最小 dex 解析器。
  * 只做 FAST/NORMAL 初筛需要的事：枚举 class_def，读每个方法的 名字/返回值/参数类型/access_flags，
  * 以及类的 父类/接口/字段数/方法数。不读方法字节码（那是 DEEP v3 的事），不加载任何类。
  *

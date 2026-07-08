@@ -2,7 +2,7 @@
 
 Xposed 环境下定位混淆 Java 方法的库。
 
-## 当前实现状态（第一版，见方案 §30）
+## 当前实现状态（第一版）
 
 已实现：
 
@@ -19,7 +19,7 @@ Xposed 环境下定位混淆 Java 方法的库。
 
 未实现（预留 API，调用即抛 / 占位）：
 
-- `DEEP`（dex 字节码字符串/调用特征，v3，将用纯 Java dex 解析，**不用 DexKit**，见方案 §10.0）
+- `DEEP`（dex 字节码字符串/调用特征，v3，将用纯 Java dex 解析，**不用 DexKit**）
 - `TRACE`（内置 API Hook + 调用栈反推，v2）
 - `dyn()` 动态 dex（v3+）
 
@@ -47,7 +47,7 @@ dependencies {
 
 ## 用法
 
-> 全部 API 与场景速查见 [`用法.md`](用法.md)。下面是最常用的几种。
+> 完整 API 与规则条件见 [`快速上手.md`](快速上手.md)。下面是最常用的几种。
 
 在 Xposed 入口 `handleLoadPackage` 中：
 

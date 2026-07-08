@@ -16,7 +16,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 import oblocator.api.Rule;
 
-/** 扫描调度（§14）。串起 进程门控 → 缓存 → dex 初筛 → 反射匹配。只定位，不 Hook（Hook 由调用方用 Hit.method 自行实现）。 */
+/** 扫描调度。串起 进程门控 → 缓存 → dex 初筛 → 反射匹配。只定位，不 Hook（Hook 由调用方用 Hit.method 自行实现）。 */
 public final class Scan {
 
     private Scan() {}
@@ -25,7 +25,7 @@ public final class Scan {
             Collections.newSetFromMap(new ConcurrentHashMap<String, Boolean>());
 
     public static ScanResult run(OL cfg) {
-        // 进程门控（§28）
+        // 进程门控
         if (!cfg.anyProc) {
             String target = cfg.proc != null ? cfg.proc : cfg.pkg;
             if (target != null && !Proc.isMain(target) && !Proc.is(target)) {
@@ -33,13 +33,13 @@ public final class Scan {
                 return empty();
             }
         }
-        // pkg 门控（§27）
+        // pkg 门控
         if (cfg.pkg == null && !cfg.allowAll) {
             throw new IllegalStateException("pkg required; call .allowAll() to scan without a package prefix");
         }
         // 模式门控
         if (cfg.mode == Mode.DEEP || cfg.mode == Mode.TRACE) {
-            throw new UnsupportedOperationException(cfg.mode + " 未在第一版实现（见方案 §30/§31/§32）");
+            throw new UnsupportedOperationException(cfg.mode + " 未在第一版实现");
         }
 
         long t0 = System.currentTimeMillis();
@@ -85,7 +85,7 @@ public final class Scan {
 
         // 全量扫描
         List<Hit> full = freshScan(cfg, rule, st);
-        // 只缓存完整结果；预算截断的不写（§10.6 / §14.1）
+        // 只缓存完整结果；预算截断的不写
         if (cfg.useCache && !st.budgetTripped) {
             cache.put(hash, full);
         }
@@ -241,7 +241,7 @@ public final class Scan {
         for (Hit h : hits) h.rule = rule;
     }
 
-    /** first/limit 只在读出后作用于返回结果；受 OL.limit 上限约束（§27）。 */
+    /** first/limit 只在读出后作用于返回结果；受 OL.limit 上限约束。 */
     private static List<Hit> applyLimit(OL cfg, Rule rule, List<Hit> full) {
         int cap = rule.first ? 1 : Math.min(rule.limit, cfg.limit);
         if (full.size() <= cap) return new ArrayList<>(full);
