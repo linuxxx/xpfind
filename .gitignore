@@ -1,0 +1,15 @@
+# Build output
+/build/
+/.gradle/
+/*.jar
+
+
+# IDE
+/.idea/
+*.iml
+
+# Machine-specific SDK path — never commit (Android convention)
+/local.properties
+
+# Target sample dex：第三方 SDK 的专有二进制，不随仓库分发（测试 fixture，本地自备）
+/audience_network.dex

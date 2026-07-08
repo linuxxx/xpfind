@@ -26,14 +26,24 @@ Xposed 环境下定位混淆 Java 方法的库。
 ## 构建
 
 ```bash
-./gradlew assembleRelease
+./gradlew jar
 ```
 
-产物为 AAR；其中 `classes.jar` 即可作为 Xposed 模块的编译期依赖。
-`de.robv.android.xposed:api` 为 `compileOnly`，运行期由框架提供。
+产物为 `build/libs/xpfind.jar`（纯 Java 库，无 res/assets/JNI，不需要 AAR）。
+Xposed 模块把它作为编译期依赖即可：
 
-> 注：本仓库开发环境无 Android SDK，源码未在本机编译验证；
-> dex 描述符转换与 LEB128 解析等纯逻辑已用独立 JUnit 式测试确认（见提交说明）。
+```gradle
+dependencies {
+    compileOnly files('libs/xpfind.jar')
+}
+```
+
+> 本库自身只在编译期依赖 `android.jar`（提供 `Context` / `android.util.Log` 等符号，运行期由系统提供），
+> **不依赖 Xposed** —— Hook 由调用方在自己的模块里用 `Hit.method` 实现。
+> 构建需要 Android SDK：默认读 `local.properties` 的 `sdk.dir`（回退环境变量 `ANDROID_HOME`），用 `android-34` 平台的 `android.jar`。
+
+> 已在本机用 `./gradlew jar test` 编译并跑通单元测试（dex 描述符转换 / LEB128 / `Match.dexPass` 初筛层，见 `src/test`）；
+> 反射确认阶段需真机（本地 JVM 加载不了 dalvik 类）。
 
 ## 用法
 
@@ -102,4 +112,3 @@ oblocator/
     ├── Filter  自定义过滤器
     └── Rule    规则模型（基类）
 ```
-# xpfind

@@ -1,0 +1,46 @@
+plugins {
+    id 'java-library'
+}
+
+// 产物：build/libs/xpfind.jar —— 纯 Java 库，供 Xposed 模块作 compileOnly 依赖。
+// 本库无 res/assets/JNI/manifest，不需要 AAR。
+base {
+    archivesName = 'xpfind'
+}
+
+// 定位 android.jar：只在编译期提供 Context / android.util.Log 等框架符号，
+// 不打进产物（运行期由宿主 App / 系统提供）。
+// 优先读 local.properties 的 sdk.dir，其次环境变量 ANDROID_HOME / ANDROID_SDK_ROOT。
+def androidSdkDir = {
+    def props = new Properties()
+    def lp = rootProject.file('local.properties')
+    if (lp.exists()) lp.withInputStream { props.load(it) }
+    def dir = props.getProperty('sdk.dir') ?:
+              System.getenv('ANDROID_HOME') ?:
+              System.getenv('ANDROID_SDK_ROOT')
+    if (!dir) {
+        throw new GradleException(
+            '找不到 Android SDK：请在 local.properties 里设置 sdk.dir，或设置环境变量 ANDROID_HOME')
+    }
+    return dir
+}()
+def androidJar = "${androidSdkDir}/platforms/android-34/android.jar"
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_1_8
+    targetCompatibility = JavaVersion.VERSION_1_8
+}
+
+dependencies {
+    // 主源集：编译期符号，不进 jar（运行期由宿主 App / 系统提供）
+    compileOnly files(androidJar)
+
+    // 本地单元测试（dex 解析 + Match.dexPass 初筛层，见 src/test）。
+    testImplementation 'junit:junit:4.13.2'
+
+    // 测试编译期需要 android.jar 解析 Context 等类型；
+    // 运行期也挂上，但 src/test 下的桩 android.util.Log 会因类路径顺序（测试输出在依赖 jar 之前）
+    // 遮蔽掉 android.jar 里那个方法体为 throw "Stub!" 的 Log —— 其余 android 符号仍是真实的。
+    testCompileOnly files(androidJar)
+    testRuntimeOnly files(androidJar)
+}
