@@ -1,4 +1,4 @@
-# ObLocator
+# xpfind
 
 Xposed 环境下定位混淆 Java 方法的库。
 
@@ -55,14 +55,23 @@ dependencies {
 public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lpparam) {
     if (!"com.target.app".equals(lpparam.packageName)) return;
 
-    // 建议异步，避免拖慢宿主启动（方案 §14.1）
-    OL.with(appContext, lpparam.classLoader)
+    // 要 Hook 早期就可能被调用的方法：用同步定位，保证 Hook 先于首次调用装上。
+    // 扫描只有冷启动贵，之后走缓存；再用 FAST + 精确 pkg + budget() 压低耗时。
+    List<Hit> hits = OL.with(appContext, lpparam.classLoader)
       .pkg("com.target.app")
-      .normal()
+      .fast()
       .budget(300)          // 最多扫 300ms，超时降级
-      .async(result -> {
-          for (Hit h : result.hits) Log.i("hit: " + h.sig());
-      });
+      .find(Ri.m().ret(String.class).args(Context.class, String.class).static_());
+
+    for (Hit h : hits) {
+        XposedBridge.hookMethod(h.method, new XC_MethodHook() {
+            @Override protected void afterHookedMethod(MethodHookParam p) {
+                Log.i("hit: " + h.sig());
+            }
+        });
+    }
+    // 目标只在后续用户操作才触发、或只需拿到方法位置时，才改用
+    //   .async(result -> { ... })  避免拖慢启动——但它会漏掉扫描完成前对目标的调用。
 }
 ```
 
