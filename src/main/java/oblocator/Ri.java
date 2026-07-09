@@ -58,6 +58,21 @@ public final class Ri {
             return this;
         }
 
+        /**
+         * 混合参数匹配：每一格可传 {@link Class}（精确/父类）或字符串（类全名，或通配符
+         * {@link Rule#ANY "*"} 表示该格任意类型）。用于「3 个参数里有一格是混淆类」的场景：
+         * <pre>argsLike(String.class, Rule.ANY, int.class)   // 中间那格通配</pre>
+         * 已知混淆类的稳定父类时，配 {@code .normal()} 直接把父类写进来更精确（弱匹配按父类链判定）。
+         */
+        public MR argsLike(Object... items) {
+            this.args = new String[items.length];
+            for (int i = 0; i < items.length; i++) {
+                Object o = items[i];
+                this.args[i] = (o instanceof Class) ? ((Class<?>) o).getName() : String.valueOf(o);
+            }
+            return this;
+        }
+
         public MR argc(int n) {
             this.argc = n;
             return this;

@@ -46,11 +46,36 @@ public final class Dex {
         public String ret;           // Class.getName() 形式
         public String[] params;      // Class.getName() 形式
         public int accessFlags;
+        // body 级信息，仅在 parseBody 打开时填充；否则恒为空数组（快路径零开销）。
+        public String[] strings = NO_STR; // 方法体里的字符串常量（const-string/jumbo）
+        public String[] calls = NO_STR;   // 方法体里 invoke-* 的目标，形如 a.b.C.method
     }
 
     private static final String[] NO_STR = new String[0];
     private static final DexMethod[] NO_METHOD = new DexMethod[0];
     private static final int NO_INDEX = 0xffffffff;
+
+    /**
+     * Dalvik 指令长度表：下标 = opcode，值 = 该指令占的 16-bit code unit 数。
+     * 用于线性遍历 code_item 的 insns 时正确跳过变长指令。0x00 nop 的三种伪指令
+     * payload（packed/sparse-switch、fill-array-data）长度依数据内容另算，见 instrWidth。
+     * 表由格式类别按区间填充（10x/12x/11x…=1，21c/22c/23x…=2，35c/3rc/31i…=3，51l=5，45cc=4）。
+     */
+    private static final int[] WIDTH = new int[256];
+    static {
+        for (int i = 0; i < 256; i++) WIDTH[i] = 1;   // 默认 1（含所有 12x/11x/10x/2addr/一元）
+        int[][] w2 = {{0x02,0x02},{0x05,0x05},{0x08,0x08},{0x13,0x13},{0x15,0x16},{0x19,0x1a},
+                {0x1c,0x1c},{0x1f,0x20},{0x22,0x23},{0x2d,0x5f},{0x60,0x6d},{0x90,0xaf},
+                {0xd0,0xe2},{0xfe,0xff}};
+        // 说明：0x2d..0x5f 覆盖 cmp/if-test/if-testz/array-op/iget-iput（都是 2 unit）；
+        // 0x3e..0x43、0x73 等 unused opcode 落在其中按 2 处理无害（正常字节码不会出现）。
+        for (int[] rg : w2) for (int op = rg[0]; op <= rg[1]; op++) WIDTH[op] = 2;
+        int[][] w3 = {{0x03,0x03},{0x06,0x06},{0x09,0x09},{0x14,0x14},{0x17,0x17},{0x1b,0x1b},
+                {0x24,0x26},{0x2a,0x2c},{0x6e,0x72},{0x74,0x78},{0xfc,0xfd}};
+        for (int[] rg : w3) for (int op = rg[0]; op <= rg[1]; op++) WIDTH[op] = 3;
+        WIDTH[0x18] = 5;                 // const-wide 51l
+        WIDTH[0xfa] = 4; WIDTH[0xfb] = 4; // invoke-polymorphic / range 45cc/4rcc
+    }
 
     /** 目标 App 的所有 apk（base + split）。 */
     public static String[] apkPaths(Context ctx) {
@@ -70,9 +95,14 @@ public final class Dex {
      * pkgPrefix 为 null 时回调全部类（配合 allowAll）。
      */
     public static void scan(String[] apkPaths, String pkgPrefix, ClassVisitor visitor) {
+        scan(apkPaths, pkgPrefix, false, visitor);
+    }
+
+    public static void scan(String[] apkPaths, String pkgPrefix, boolean parseBody,
+                            ClassVisitor visitor) {
         for (String path : apkPaths) {
             try {
-                if (!scanZip(new File(path), pkgPrefix, visitor)) return; // visitor 中止
+                if (!scanZip(new File(path), pkgPrefix, parseBody, visitor)) return; // visitor 中止
             } catch (Throwable t) {
                 Log.w("dex open fail " + path, t);
             }
@@ -84,6 +114,11 @@ public final class Dex {
      * pkgPrefix 为 null 时回调全部类。
      */
     public static void scanFiles(String[] paths, String pkgPrefix, ClassVisitor visitor) {
+        scanFiles(paths, pkgPrefix, false, visitor);
+    }
+
+    public static void scanFiles(String[] paths, String pkgPrefix, boolean parseBody,
+                                 ClassVisitor visitor) {
         for (String path : paths) {
             File f = new File(path);
             if (!f.exists()) {
@@ -93,9 +128,9 @@ public final class Dex {
             try {
                 if (isRawDex(f)) {
                     byte[] b = readFile(f);
-                    if (b != null && !parseDex(b, pkgPrefix, visitor)) return;
+                    if (b != null && !parseDex(b, pkgPrefix, parseBody, visitor)) return;
                 } else {
-                    if (!scanZip(f, pkgPrefix, visitor)) return;
+                    if (!scanZip(f, pkgPrefix, parseBody, visitor)) return;
                 }
             } catch (Throwable t) {
                 Log.w("dex file fail " + path, t);
@@ -108,12 +143,17 @@ public final class Dex {
      * pkgPrefix 为 null 时回调全部类。
      */
     public static void scanBytes(byte[] data, String pkgPrefix, ClassVisitor visitor) {
+        scanBytes(data, pkgPrefix, false, visitor);
+    }
+
+    public static void scanBytes(byte[] data, String pkgPrefix, boolean parseBody,
+                                 ClassVisitor visitor) {
         if (data == null || data.length < 8) return;
         try {
             if (data[0] == 'd' && data[1] == 'e' && data[2] == 'x') {
-                parseDex(data, pkgPrefix, visitor);
+                parseDex(data, pkgPrefix, parseBody, visitor);
             } else {
-                scanZipStream(new ByteArrayInputStream(data), pkgPrefix, visitor);
+                scanZipStream(new ByteArrayInputStream(data), pkgPrefix, parseBody, visitor);
             }
         } catch (Throwable t) {
             Log.w("dex bytes fail", t);
@@ -127,7 +167,8 @@ public final class Dex {
     }
 
     /** 打开 zip/apk/jar，扫描其中根级 classes*.dex。返回 false 表示 visitor 中止。 */
-    private static boolean scanZip(File f, String prefix, ClassVisitor visitor) throws Exception {
+    private static boolean scanZip(File f, String prefix, boolean parseBody, ClassVisitor visitor)
+            throws Exception {
         ZipFile zf = null;
         try {
             zf = new ZipFile(f);
@@ -136,7 +177,7 @@ public final class Dex {
                 ZipEntry e = en.nextElement();
                 if (isRootDex(e.getName())) {
                     byte[] buf = readFully(zf.getInputStream(e), (int) e.getSize());
-                    if (buf != null && !parseDex(buf, prefix, visitor)) return false;
+                    if (buf != null && !parseDex(buf, prefix, parseBody, visitor)) return false;
                 }
             }
         } finally {
@@ -146,15 +187,15 @@ public final class Dex {
     }
 
     /** 从 zip 字节流扫描根级 classes*.dex（无随机访问，逐条读）。 */
-    private static void scanZipStream(InputStream in, String prefix, ClassVisitor visitor)
-            throws Exception {
+    private static void scanZipStream(InputStream in, String prefix, boolean parseBody,
+                                      ClassVisitor visitor) throws Exception {
         ZipInputStream zis = new ZipInputStream(in);
         try {
             ZipEntry e;
             while ((e = zis.getNextEntry()) != null) {
                 if (isRootDex(e.getName())) {
                     byte[] buf = readCurrentEntry(zis);
-                    if (buf != null && !parseDex(buf, prefix, visitor)) return;
+                    if (buf != null && !parseDex(buf, prefix, parseBody, visitor)) return;
                 }
             }
         } finally {
@@ -214,7 +255,8 @@ public final class Dex {
     }
 
     /** 返回 false 表示 visitor 中止。 */
-    private static boolean parseDex(byte[] b, String prefix, ClassVisitor visitor) {
+    private static boolean parseDex(byte[] b, String prefix, boolean parseBody,
+                                    ClassVisitor visitor) {
         try {
             if (b.length < 112 || b[0] != 'd' || b[1] != 'e' || b[2] != 'x') {
                 return true; // 非 dex，跳过
@@ -274,7 +316,7 @@ public final class Dex {
                     dc.accessFlags = accessFlags;
                     dc.superName = (superIdx == NO_INDEX) ? null : r.typeName(superIdx);
                     dc.interfaces = r.typeList(itfOff);
-                    fillMethods(r, dc, classDataOff);
+                    fillMethods(r, dc, classDataOff, parseBody);
                 } catch (DexFormatException fe) {
                     skipped++;
                     Log.d("dex skip class " + cn + ": " + fe.getMessage());
@@ -306,7 +348,7 @@ public final class Dex {
         DexFormatException(String msg) { super(msg); }
     }
 
-    private static void fillMethods(Reader r, DexClass dc, int classDataOff) {
+    private static void fillMethods(Reader r, DexClass dc, int classDataOff, boolean parseBody) {
         if (classDataOff == 0) {
             dc.methods = NO_METHOD;
             return;
@@ -337,20 +379,23 @@ public final class Dex {
 
         DexMethod[] ms = new DexMethod[directMethods + virtualMethods];
         int idx = 0;
-        idx = readMethods(r, ms, idx, directMethods);
-        idx = readMethods(r, ms, idx, virtualMethods);
+        idx = readMethods(r, ms, idx, directMethods, parseBody);
+        idx = readMethods(r, ms, idx, virtualMethods, parseBody);
         dc.methods = ms;
     }
 
     /** direct 与 virtual 是两个独立列表，method_idx_diff 各自从 0 累加。 */
-    private static int readMethods(Reader r, DexMethod[] out, int outIdx, int count) {
+    private static int readMethods(Reader r, DexMethod[] out, int outIdx, int count,
+                                   boolean parseBody) {
         int methodIdx = 0;
         for (int i = 0; i < count; i++) {
             int diff = r.uleb();
             methodIdx += diff;
             int accessFlags = r.uleb();
-            r.uleb(); // code_off，v1 不需要
-            out[outIdx++] = r.method(methodIdx, accessFlags);
+            int codeOff = r.uleb(); // code_off：快路径不用；带 body 条件时用它解析 code_item
+            DexMethod dm = r.method(methodIdx, accessFlags);
+            if (parseBody) r.parseBody(dm, codeOff);
+            out[outIdx++] = dm;
         }
         return outIdx;
     }
@@ -457,6 +502,67 @@ public final class Dex {
             m.ret = typeName(retTypeIdx);
             m.params = typeList(paramsOff);
             return m;
+        }
+
+        /** method_id[idx] -> "a.b.C.method"（声明类名 + 方法名），供 body 的 call 匹配用。 */
+        String methodRefName(int methodIdx) {
+            int base = methodIdsOff + methodIdx * 8;
+            int classIdx = u2(base);
+            int nameIdx = u4(base + 4);
+            return typeName(classIdx) + "." + str(nameIdx);
+        }
+
+        /**
+         * 解析 code_item，抽取方法体里的字符串常量与被调用方法引用，填入 m.strings / m.calls。
+         * codeOff==0（abstract/native）或结构异常时保持空数组——body 读崩绝不牵连方法签名。
+         */
+        void parseBody(DexMethod m, int codeOff) {
+            if (codeOff <= 0 || codeOff + 16 > len) return;
+            try {
+                int insnsSize = u4(codeOff + 12);            // code unit 数
+                if (insnsSize <= 0) return;
+                int insnsOff = codeOff + 16;
+                long end = (long) insnsOff + (long) insnsSize * 2;
+                if (end > len) return;
+                java.util.List<String> strs = new java.util.ArrayList<String>();
+                java.util.List<String> calls = new java.util.ArrayList<String>();
+                int off = insnsOff;
+                for (int steps = 0; off < end && steps <= insnsSize; steps++) {
+                    int unit = u2(off);
+                    int op = unit & 0xff;
+                    if (op == 0x1a) {                        // const-string 21c
+                        strs.add(str(u2(off + 2)));
+                    } else if (op == 0x1b) {                 // const-string/jumbo 31c
+                        strs.add(str(u4(off + 2)));
+                    } else if ((op >= 0x6e && op <= 0x72) || (op >= 0x74 && op <= 0x78)) {
+                        calls.add(methodRefName(u2(off + 2))); // invoke-* / invoke-*/range
+                    }
+                    int w = instrWidth(op, unit, off);
+                    if (w <= 0) break;                       // 防御：非法宽度，停止遍历
+                    off += w * 2;
+                }
+                if (!strs.isEmpty()) m.strings = strs.toArray(new String[0]);
+                if (!calls.isEmpty()) m.calls = calls.toArray(new String[0]);
+            } catch (DexFormatException fe) {
+                // body 越界/畸形：丢弃已收集的，方法签名仍有效
+            }
+        }
+
+        /** 指令占的 code unit 数。0x00 需辨别三种 payload 伪指令（长度依内容而定）。 */
+        private int instrWidth(int op, int unit, int off) {
+            if (op == 0x00) {
+                if (unit == 0x0100) {            // packed-switch-payload
+                    return u2(off + 2) * 2 + 4;
+                } else if (unit == 0x0200) {     // sparse-switch-payload
+                    return u2(off + 2) * 4 + 2;
+                } else if (unit == 0x0300) {     // fill-array-data-payload
+                    int elemWidth = u2(off + 2);
+                    int count = u4(off + 4);
+                    return (elemWidth * count + 1) / 2 + 4;
+                }
+                return 1;                        // 真正的 nop
+            }
+            return WIDTH[op];
         }
 
         String mutf8(int q, int utf16len) {

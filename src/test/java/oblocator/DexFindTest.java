@@ -229,6 +229,98 @@ public class DexFindTest {
         assertTrue("FAST 用父类不该命中（应改用 .normal()），实际 " + hits, hits.isEmpty());
     }
 
+    /**
+     * 单格通配符 "*"：3 个参数里让中间那格通配（模拟被混淆的参数类），
+     * 其余两格精确。FAST 下应与精确写法命中同一个 a5#A05。
+     */
+    @Test
+    public void argWildcardMatchesObfuscatedSlot() {
+        requireDex();
+
+        // 基准：三格全精确，FAST 恰好命中 a5#A05。
+        List<ProbeHit> exact = OL.with(null, null)
+                .dex(DEX_PATH).pkg(FB_PREFIX).anyProc().fast()
+                .probe(Ri.m().retSuper(Enum.class)
+                        .args(String.class, String.class, Map.class).public_());
+        assertEquals("基准精确规则应命中 1 个", 1, exact.size());
+
+        // 中间那格用通配符 "*"（假装它是混淆类，名字写不出来）：仍应命中同一个方法。
+        List<ProbeHit> wild = OL.with(null, null)
+                .dex(DEX_PATH).pkg(FB_PREFIX).anyProc().fast()
+                .probe(Ri.m().retSuper(Enum.class)
+                        .argsLike(String.class, Rule.ANY, Map.class).public_());
+        System.out.println("[argWildcard] wild hits = " + wild);
+        assertEquals("通配中间格后仍应恰好命中 1 个", 1, wild.size());
+        assertTrue("命中应仍是 a5#A05",
+                wild.get(0).cls.equals(TARGET_CLASS) && wild.get(0).name.equals("A05"));
+
+        // 反面：把已知格写错类型，通配符不该"救回来"——应命中 0。
+        List<ProbeHit> wrong = OL.with(null, null)
+                .dex(DEX_PATH).pkg(FB_PREFIX).anyProc().fast()
+                .probe(Ri.m().retSuper(Enum.class)
+                        .argsLike("java.lang.Integer", Rule.ANY, Map.class).public_());
+        assertTrue("已知格类型不符时通配符不应命中", wrong.isEmpty());
+    }
+
+    /**
+     * body 级条件（str）：先用 parseBody 扫出目标类里某方法的一个字符串常量，
+     * 再用 {@code .str(那个字符串)} probe，断言该方法被命中——证明 code_item 解析 + dexPass body 校验通路。
+     */
+    @Test
+    public void findsByBodyString() {
+        requireDex();
+
+        // 第一遍：打开 parseBody，找一个"字符串够长、够独特"的方法作靶子。
+        final String[] hitCls = {null};
+        final String[] hitMethod = {null};
+        final String[] hitStr = {null};
+        Dex.scanFiles(new String[]{DEX_PATH}, FB_PREFIX, true, new Dex.ClassVisitor() {
+            @Override public boolean visit(Dex.DexClass c) {
+                if (hitStr[0] != null) return false;
+                for (Dex.DexMethod m : c.methods) {
+                    for (String s : m.strings) {
+                        if (s != null && s.length() >= 8) {
+                            hitCls[0] = c.name; hitMethod[0] = m.name; hitStr[0] = s;
+                            return false;
+                        }
+                    }
+                }
+                return true;
+            }
+        });
+        assumeTrue("该 dex 未解析出可用字符串常量，跳过", hitStr[0] != null);
+        System.out.println("[findsByBodyString] target " + hitCls[0] + "#" + hitMethod[0]
+                + " str=\"" + hitStr[0] + "\"");
+
+        // 第二遍：用该字符串作 body 条件 probe，应命中同一个方法。
+        List<ProbeHit> hits = OL.with(null, null)
+                .dex(DEX_PATH)
+                .pkg(FB_PREFIX)
+                .anyProc()
+                .normal()
+                .probe(Ri.m().str(hitStr[0]));
+        System.out.println("[findsByBodyString] str-probe hits = " + hits.size());
+        boolean found = false;
+        for (ProbeHit h : hits) {
+            if (hitCls[0].equals(h.cls) && hitMethod[0].equals(h.name)) found = true;
+        }
+        assertTrue("str 条件应命中含该字符串的方法 " + hitCls[0] + "#" + hitMethod[0], found);
+    }
+
+    /** 反面用例：body 里不存在的字符串，str 条件应命中为空（证明 body 校验真的在过滤）。 */
+    @Test
+    public void bodyStringMissesWhenAbsent() {
+        requireDex();
+        List<ProbeHit> hits = OL.with(null, null)
+                .dex(DEX_PATH)
+                .pkg(FB_PREFIX)
+                .anyProc()
+                .normal()
+                .probe(Ri.m().str("__xpfind_no_such_string_literal_zzz__"));
+        System.out.println("[bodyStringMissesWhenAbsent] hits = " + hits.size());
+        assertTrue("不存在的字符串不该命中任何方法", hits.isEmpty());
+    }
+
     /*
      * ── 第二阶段（反射确认）如何测？ ─────────────────────────────────────────────
      * 反射要真机/模拟器，写成 instrumented 测试放 src/androidTest：

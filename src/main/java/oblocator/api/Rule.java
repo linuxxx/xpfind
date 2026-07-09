@@ -12,6 +12,9 @@ import oblocator.Sig;
  */
 public class Rule {
 
+    /** args 里的单格通配符：该位置接受任意参数类型（用于混淆/不关心的那一格）。 */
+    public static final String ANY = "*";
+
     public String id;
 
     // 类条件

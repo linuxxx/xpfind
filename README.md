@@ -12,14 +12,18 @@ Xposed 环境下定位混淆 Java 方法的库。
 - 三层缓存：L1 内存 + L2/L3 文件（JSON，原子写），命中缓存读出后反射校验
 - 异步扫描 `.async()` + 时间/类数预算 `.budget()` / `.maxClasses()`
 - `limit` / `first` / 自定义 `Filter`
+- **方法体条件** `.str()` / `.call()`：按需解析 dex `code_item`（字符串常量 / invoke 目标），字符串常量抗混淆，是强锚点；不带该条件时走零开销快路径
+- **单格参数通配符** `Rule.ANY`（`"*"`）/ `.argsLike()`：匹配被混淆的那一格参数类型
 - 进程门控（默认只主进程）、`pkg` 必填门控（`allowAll()` 显式绕过）
 
 > **本库只定位，不做 Hook。** 终止方法 `find` / `run` 都返回 `List<Hit>`；
 > 拿到 `Hit.method`（`java.lang.reflect.Method`）后由调用方用 Xposed API 自己 Hook。
 
+> 方法体特征（字符串常量 / 调用目标）已作为 `FAST`/`NORMAL` 下的 `.str()` / `.call()` 条件落地（纯 Java dex 解析，**不用 DexKit**）。
+
 未实现（预留 API，调用即抛 / 占位）：
 
-- `DEEP`（dex 字节码字符串/调用特征，v3，将用纯 Java dex 解析，**不用 DexKit**）
+- `DEEP` 模式外壳（更完整的字节码特征匹配，v3）
 - `TRACE`（内置 API Hook + 调用栈反推，v2）
 - `dyn()` 动态 dex（v3+）
 

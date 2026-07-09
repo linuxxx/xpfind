@@ -68,6 +68,9 @@ public final class Match {
         if (!nameOk(r, m.name)) return false;
         if (!countOk(r, m.params.length)) return false;
         if (!modsOk(r, m.accessFlags)) return false;
+        // body 级条件：需要 Dex 以 parseBody 打开解析过 code_item，否则 m.strings/m.calls 为空必然不满足。
+        if (!strsOk(r, m)) return false;
+        if (!callsOk(r, m)) return false;
         if (r.superCls != null && !r.superCls.equals(c.superName)) return false;
         if (r.hasItf != null && !hasItf(c.interfaces, r.hasItf)) return false;
         if (r.fieldc != null && c.fieldCount != r.fieldc) return false;
@@ -88,6 +91,32 @@ public final class Match {
         return true;
     }
 
+    /** 规则要求的每个字符串常量都得在方法体里出现（子串匹配）。空要求视为通过。 */
+    static boolean strsOk(Rule r, Dex.DexMethod m) {
+        if (r.strs == null || r.strs.isEmpty()) return true;
+        for (String want : r.strs) {
+            if (want != null && !containsSub(m.strings, want)) return false;
+        }
+        return true;
+    }
+
+    /** 规则要求的每个调用目标都得在方法体的 invoke 目标里出现（子串匹配，可只写方法名或 类.方法）。 */
+    static boolean callsOk(Rule r, Dex.DexMethod m) {
+        if (r.calls == null || r.calls.isEmpty()) return true;
+        for (String want : r.calls) {
+            if (want != null && !containsSub(m.calls, want)) return false;
+        }
+        return true;
+    }
+
+    private static boolean containsSub(String[] pool, String want) {
+        if (pool == null) return false;
+        for (String s : pool) {
+            if (s != null && s.contains(want)) return true;
+        }
+        return false;
+    }
+
     /** type 自身或其父类链（在 superIndex 内可追溯的部分）里是否含 wantSuper。 */
     private static boolean isSubOf(String type, String wantSuper, Map<String, String> superIndex) {
         String cur = type;
@@ -102,6 +131,7 @@ public final class Match {
         if (r.args == null) return true;
         if (params.length != r.args.length) return false;
         for (int i = 0; i < params.length; i++) {
+            if (Rule.ANY.equals(r.args[i])) continue;        // 通配：该格任意类型
             if (!r.args[i].equals(params[i])) return false;
         }
         return true;
@@ -155,6 +185,7 @@ public final class Match {
         if (r.args == null) return true;
         if (ps.length != r.args.length) return false;
         for (int i = 0; i < ps.length; i++) {
+            if (Rule.ANY.equals(r.args[i])) continue;        // 通配：该格任意类型
             if (!r.args[i].equals(ps[i].getName())) return false;
         }
         return true;
@@ -171,6 +202,7 @@ public final class Match {
         if (r.args == null) return true;
         if (ps.length != r.args.length) return false;
         for (int i = 0; i < ps.length; i++) {
+            if (Rule.ANY.equals(r.args[i])) continue;        // 通配：该格任意类型
             Class<?> want = load(r.args[i], cl);
             if (want == null) {
                 if (!r.args[i].equals(ps[i].getName())) return false;

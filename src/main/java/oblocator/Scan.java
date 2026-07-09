@@ -108,6 +108,12 @@ public final class Scan {
         final String prefix = cfg.allowAll ? null : cfg.pkg;
         // retSuper 需要全 dex 的 类→父类 索引（先扫一遍收集）；不用 retSuper 时不建，零开销。
         final Map<String, String> superIndex = rule.retSuper != null ? buildSuperIndex(cfg) : null;
+        // body 条件（str/call）只能在 dex 层判定，反射看不到字节码。带 body 条件时：
+        //   1) 打开 parseBody 让 Dex 解析 code_item；
+        //   2) 记录每个类里"dex 层已通过（含 body）的方法签名"，反射阶段据此收窄，
+        //      否则同签名但不满足 body 的兄弟方法会被反射误纳。
+        final boolean needBody = needsBody(rule);
+        final Map<String, Set<String>> matched = needBody ? new HashMap<String, Set<String>>() : null;
         Dex.ClassVisitor visitor = new Dex.ClassVisitor() {
             @Override
             public boolean visit(Dex.DexClass c) {
@@ -117,17 +123,21 @@ public final class Scan {
                     tripped[0] = true;
                     return false; // 中止扫描
                 }
+                Set<String> keys = null;
                 for (Dex.DexMethod m : c.methods) {
                     if (Match.dexPass(rule, mode, c, m, superIndex)) {
                         cand.add(c.name);
-                        break; // 该类已入候选，反射阶段再逐方法确认
+                        if (!needBody) break; // 该类已入候选，反射阶段再逐方法确认
+                        if (keys == null) keys = new LinkedHashSet<>();
+                        keys.add(methodKey(m.name, m.params));
                     }
                 }
+                if (needBody && keys != null) matched.put(c.name, keys);
                 return true;
             }
         };
 
-        scanSources(cfg, prefix, visitor);
+        scanSources(cfg, prefix, needBody, visitor);
         st.classesScanned += counter[0];
         if (tripped[0]) {
             st.budgetTripped = true;
@@ -138,9 +148,15 @@ public final class Scan {
         // 阶段 2：只加载候选类，反射做最终匹配（NORMAL 走弱匹配）
         List<Hit> hits = new ArrayList<>();
         for (String cn : cand) {
+            Set<String> allow = needBody ? matched.get(cn) : null;
             try {
                 Class<?> c = Class.forName(cn, false, cl);
                 for (Method m : c.getDeclaredMethods()) {
+                    // body 条件：只认 dex 层已通过 body 校验的那些具体方法
+                    if (needBody && (allow == null
+                            || !allow.contains(methodKey(m.getName(), paramNames(m))))) {
+                        continue;
+                    }
                     if (Match.reflectPass(rule, mode, c, m, cl)) {
                         hits.add(makeHit(c, m, rule));
                     }
@@ -152,26 +168,53 @@ public final class Scan {
         return hits;
     }
 
+    /** 规则是否带 body 级条件（字符串常量 / 调用目标）——决定是否需要解析 code_item。 */
+    static boolean needsBody(Rule rule) {
+        return (rule.strs != null && !rule.strs.isEmpty())
+                || (rule.calls != null && !rule.calls.isEmpty());
+    }
+
+    /** 方法唯一键：名字 + 参数类型列表。Java 不允许仅返回值不同的重载，故足以定位。 */
+    private static String methodKey(String name, String[] params) {
+        StringBuilder sb = new StringBuilder(name).append('(');
+        for (int i = 0; i < params.length; i++) {
+            if (i > 0) sb.append(',');
+            sb.append(params[i]);
+        }
+        return sb.append(')').toString();
+    }
+
+    private static String[] paramNames(Method m) {
+        Class<?>[] ps = m.getParameterTypes();
+        String[] out = new String[ps.length];
+        for (int i = 0; i < ps.length; i++) out[i] = ps[i].getName();
+        return out;
+    }
+
     /**
      * 按 cfg 的来源设置把类喂给 visitor：优先自定义来源（.dex/.asset/.dexBytes），
      * 否则扫默认宿主 APK。.asset() 需要 cfg.ctx，其余不需要。
      */
     static void scanSources(OL cfg, String prefix, Dex.ClassVisitor visitor) {
+        scanSources(cfg, prefix, false, visitor);
+    }
+
+    static void scanSources(OL cfg, String prefix, boolean parseBody, Dex.ClassVisitor visitor) {
         boolean custom = !cfg.dexFiles.isEmpty() || !cfg.assetNames.isEmpty()
                 || !cfg.dexBytes.isEmpty();
         if (custom) {
             if (!cfg.dexFiles.isEmpty()) {
-                Dex.scanFiles(cfg.dexFiles.toArray(new String[0]), prefix, visitor);
+                Dex.scanFiles(cfg.dexFiles.toArray(new String[0]), prefix, parseBody, visitor);
             }
             for (String name : cfg.assetNames) {
                 byte[] data = readAsset(cfg.ctx, name);
-                if (data != null) Dex.scanBytes(data, prefix, visitor);
+                if (data != null) Dex.scanBytes(data, prefix, parseBody, visitor);
             }
             for (byte[] data : cfg.dexBytes) {
-                Dex.scanBytes(data, prefix, visitor);
+                Dex.scanBytes(data, prefix, parseBody, visitor);
             }
         } else {
-            Dex.scan(Dex.apkPaths(cfg.ctx), prefix, visitor);
+            Dex.scan(Dex.apkPaths(cfg.ctx), prefix, parseBody, visitor);
         }
     }
 
@@ -185,6 +228,7 @@ public final class Scan {
         final String prefix = cfg.allowAll ? null : cfg.pkg;
         final List<ProbeHit> out = new ArrayList<>();
         final Map<String, String> superIndex = rule.retSuper != null ? buildSuperIndex(cfg) : null;
+        final boolean needBody = needsBody(rule);
         Dex.ClassVisitor visitor = new Dex.ClassVisitor() {
             @Override
             public boolean visit(Dex.DexClass c) {
@@ -197,7 +241,7 @@ public final class Scan {
             }
         };
         try {
-            scanSources(cfg, prefix, visitor);
+            scanSources(cfg, prefix, needBody, visitor);
         } catch (Throwable t) {
             Log.e("probe threw", t);
         }
